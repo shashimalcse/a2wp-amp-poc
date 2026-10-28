@@ -1,0 +1,20 @@
+# Local workaround, development only. Agent Manager 1.0 refuses MCP proxy
+# upstreams whose host resolves to a non-public IP (utils/ssrf), and the
+# wallet's Service is on the cluster network. So, inside the cluster only:
+#   - wallet.a2wp.example resolves to 192.88.99.10 (the deprecated 6to4 relay
+#     anycast prefix, RFC 7526, which the SSRF list does not block), and
+#   - kube-proxy routes that address, as an externalIP of this Service, to
+#     the wallet pod.
+# Nothing is exposed outside the k3d cluster. This defeats Agent Manager's
+# SSRF check, and exists only to show the integration.
+apiVersion: v1
+kind: Service
+metadata:
+  name: wallet-public
+  namespace: a2wp
+spec:
+  selector:
+    app: wallet
+  externalIPs: ["192.88.99.10"]
+  ports:
+    - { name: http, port: 80, targetPort: http }

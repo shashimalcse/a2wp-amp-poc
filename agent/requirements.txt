@@ -1,0 +1,8 @@
+# For the Agent Manager Python buildpack (platform-hosted); local runs use uv.
+langchain-openai==1.7.3
+langchain-mcp-adapters==0.3.2
+langgraph==1.2.18
+python-dotenv==1.2.4
+httpx==0.28.1
+fastapi>=0.115
+uvicorn>=0.30

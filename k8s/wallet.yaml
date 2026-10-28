@@ -1,0 +1,154 @@
+# The A2WP wallet platform and its dev counterparties.
+#
+# devstack runs the OpenID4VCI issuer and OpenID4VP verifier with a fresh root
+# CA on every start. The wallet's init container fetches that CA and the
+# wallet trusts it for outbound TLS, so restart the wallet after the devstack.
+# They are separate pods: a pod cannot reach itself through its Service here
+# (no hairpin NAT on the k3d flannel network).
+#
+# Service "wallet" is the upstream the Agent Manager MCP proxy points at.
+# Service "devstack" is how the wallet reaches the issuer and verifier.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: a2wp
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: wallet-config
+  namespace: a2wp
+data:
+  wallet.json: |
+    {
+      "listen": ":8080",
+      "public_url": "http://localhost:8180",
+      "database": "sqlite:/data/wallet.db",
+      "network": {
+        "allow_private": true,
+        "allow_loopback": false,
+        "extra_roots_file": "/shared/devstack-root.pem",
+        "timeout_seconds": 15
+      },
+      "log_level": "debug"
+    }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: wallet-data
+  namespace: a2wp
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: devstack
+  namespace: a2wp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: devstack
+  template:
+    metadata:
+      labels:
+        app: devstack
+    spec:
+      containers:
+        - name: devstack
+          image: a2wp-wallet:poc
+          imagePullPolicy: Never
+          command: ["/a2wp-devstack"]
+          args:
+            - -host=devstack.a2wp.svc.cluster.local
+            - -issuer-addr=0.0.0.0:8443
+            - -verifier-addr=0.0.0.0:9443
+            - -api-addr=0.0.0.0:8081
+            - -root-ca=/tmp/devstack-root.pem
+            - -configs=agent=https://agents.example/agent-credential
+          ports:
+            - { name: issuer, containerPort: 8443 }
+            - { name: verifier, containerPort: 9443 }
+            - { name: control, containerPort: 8081 }
+          readinessProbe:
+            tcpSocket: { port: 8081 }
+            periodSeconds: 2
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wallet
+  namespace: a2wp
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: wallet
+  template:
+    metadata:
+      labels:
+        app: wallet
+    spec:
+      securityContext:
+        fsGroup: 65532
+      initContainers:
+        - name: devstack-root
+          image: curlimages/curl:8.10.1
+          command: ["sh", "-c", "until curl -sf -o /shared/devstack-root.pem http://devstack.a2wp.svc.cluster.local:8081/root.pem; do sleep 1; done"]
+          volumeMounts:
+            - { name: shared, mountPath: /shared }
+      containers:
+        - name: wallet
+          image: a2wp-wallet:poc
+          imagePullPolicy: Never
+          args: ["serve"]
+          env:
+            - name: A2WP_CONFIG
+              value: /etc/a2wp/wallet.json
+            - name: A2WP_MASTER_KEY
+              valueFrom:
+                secretKeyRef: { name: wallet-master-key, key: key }
+          ports:
+            - { name: http, containerPort: 8080 }
+          volumeMounts:
+            - { name: config, mountPath: /etc/a2wp }
+            - { name: data, mountPath: /data }
+            - { name: shared, mountPath: /shared }
+      volumes:
+        - name: config
+          configMap: { name: wallet-config }
+        - name: data
+          persistentVolumeClaim: { claimName: wallet-data }
+        - name: shared
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: wallet
+  namespace: a2wp
+spec:
+  selector:
+    app: wallet
+  ports:
+    - { name: http, port: 8080, targetPort: http }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: devstack
+  namespace: a2wp
+spec:
+  selector:
+    app: devstack
+  ports:
+    - { name: issuer, port: 8443, targetPort: issuer }
+    - { name: verifier, port: 9443, targetPort: verifier }
+    - { name: control, port: 8081, targetPort: control }
