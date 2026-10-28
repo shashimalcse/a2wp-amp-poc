@@ -10,10 +10,10 @@ Settings come from the environment, from .env next to this file, or from
 ../.secrets/agent.env (which the PoC setup writes):
 
     OPENROUTER_API_KEY          the model key
-    WALLET_MCP_URL              the proxy's gateway URL for this environment
-    WALLET_MCP_RESOURCE         the proxy's public URL, the AgentID token's
-                                resource (default WALLET_MCP_URL; differs when
-                                the agent is platform-hosted and calls the
+    WALLET_MCP_URL              the proxy's public gateway URL for this
+                                environment, also the AgentID token's resource
+    WALLET_MCP_ENDPOINT         where to connect instead, when the public URL is
+                                not reachable (a platform-hosted agent uses the
                                 gateway's internal URL)
     WALLET_MCP_API_KEY          when the proxy uses API-key security
     AMP_AGENTID_CLIENT_ID       when the proxy uses OAuth (AgentID) security,
@@ -56,7 +56,7 @@ def wallet_headers(url: str) -> dict[str, str]:
         data={
             "grant_type": "client_credentials",
             "scope": os.environ.get("AMP_AGENTID_SCOPES", ""),
-            "resource": os.environ.get("WALLET_MCP_RESOURCE") or url,
+            "resource": url,
         },
         verify=os.environ.get("AMP_CA_FILE", True),
         timeout=30,
@@ -67,8 +67,9 @@ def wallet_headers(url: str) -> dict[str, str]:
 
 async def wallet_tools():
     url = os.environ["WALLET_MCP_URL"]
+    endpoint = os.environ.get("WALLET_MCP_ENDPOINT") or url
     client = MultiServerMCPClient(
-        {"wallet": {"url": url, "transport": "streamable_http", "headers": wallet_headers(url)}}
+        {"wallet": {"url": endpoint, "transport": "streamable_http", "headers": wallet_headers(url)}}
     )
     return await client.get_tools()
 

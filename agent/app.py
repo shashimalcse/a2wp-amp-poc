@@ -9,7 +9,6 @@ the AgentID values and WALLET_MCP_URL, and instruments the process for traces.
 """
 
 import logging
-import os
 from uuid import uuid4
 
 import uvicorn
@@ -58,4 +57,5 @@ async def chat(req: ChatRequest) -> ChatResponse:
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", "8000")))
+    # The chat contract fixes port 8000 (the platform also sets PORT=8080).
+    uvicorn.run(app, host="0.0.0.0", port=8000)
